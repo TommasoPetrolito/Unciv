@@ -165,7 +165,7 @@ class TradeEvaluation {
             TradeType.PeaceNegotiation -> {
                 val civToMakePeaceWith = civInfo.gameInfo.getCivilization(offer.name)
                 // following Boolean condition check is the same that triggers the Peace Offer automation in Diplomacy Automation
-                val alreadyWantsPeaceFlag = (MotivationToAttackAutomation.hasAtLeastMotivationToAttack(civInfo, civToMakePeaceWith, 10)  >= 10)
+                val alreadyWantsPeaceFlag = (MotivationToAttackAutomation.hasAtLeastMotivationToAttack(civInfo, civToMakePeaceWith, 10) < 10)
                 val costRequiredByEnemy = evaluatePeaceCostForThem(civInfo, civToMakePeaceWith)
                 val costRequiredByCiv = evaluatePeaceCostForThem(civToMakePeaceWith, civInfo)
                 val gapToPay = if (alreadyWantsPeaceFlag && (civInfo.gold < costRequiredByEnemy))
