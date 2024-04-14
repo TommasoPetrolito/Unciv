@@ -7,8 +7,10 @@ import com.unciv.logic.city.City
 import com.unciv.logic.civilization.Civilization
 import com.unciv.logic.civilization.diplomacy.DiplomacyFlags
 import com.unciv.logic.civilization.diplomacy.DiplomacyManager
+import com.unciv.logic.civilization.diplomacy.DiplomaticStatus
 import com.unciv.logic.civilization.diplomacy.RelationshipLevel
 import com.unciv.logic.map.BFS
+import com.unciv.logic.map.mapunit.MapUnit
 import com.unciv.logic.map.tile.Tile
 import com.unciv.models.ruleset.Building
 import com.unciv.models.ruleset.unique.UniqueType
@@ -87,8 +89,16 @@ object MotivationToAttackAutomation {
 
         modifierMap["War with allies"] = getAlliedWarMotivation(civInfo, otherCiv)
 
-
         var motivationSoFar = modifierMap.values.sum()
+
+        // for ongoing WAR in following lines we consider the evident will to proceed attacking by counting the military units that are close to other civ cities
+        // in general a proper war with real willingness to conquer cities in the short term we will have at least 3 or more units
+        // idea is that if a real intent of continuing war in the shor term can be inferred due to current units distributions on the map close to cities we will get at least a +15/20 modifier by this
+        if (civInfo.getDiplomacyManager(otherCiv).diplomaticStatus == DiplomaticStatus.War) {
+            // maxDistance is the upper bound of aeral distance value from any enemy city center tile to consider it "close"
+            val immediateCloseArmySize = countUnitsCloseToOtherCivCities(civInfo, otherCiv, 7)
+            motivationSoFar += 5 * immediateCloseArmySize
+        }
 
         // Short-circuit to avoid expensive BFS
         if (motivationSoFar < atLeast) return motivationSoFar
@@ -257,5 +267,16 @@ object MotivationToAttackAutomation {
             )
         damageReceivedWhenAttacking < 100
     }
+
+    private fun countUnitsCloseToOtherCivCities(civInfo: Civilization, otherCiv: Civilization, maxDistance: Int): Int {
+        var unitsCounter = 0
+        for (unit in civInfo.units.getCivUnits().filter { it.isMilitary() }) {
+            if (otherCiv.cities.any { unit.getTile().aerialDistanceTo(it.getCenterTile()) < maxDistance }) {
+                unitsCounter += 1
+            }
+        }
+        return unitsCounter
+    }
+
 
 }
