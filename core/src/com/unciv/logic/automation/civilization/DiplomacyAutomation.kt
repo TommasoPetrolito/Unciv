@@ -15,6 +15,8 @@ import com.unciv.logic.trade.TradeLogic
 import com.unciv.logic.trade.TradeOffer
 import com.unciv.logic.trade.TradeRequest
 import com.unciv.logic.trade.TradeType
+import com.unciv.models.Counter
+import com.unciv.models.Religion
 import com.unciv.models.ruleset.Victory
 import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
@@ -282,7 +284,9 @@ object DiplomacyAutomation {
             .filter { it.tradeRequests.none { tradeRequest -> tradeRequest.requestingCiv == civInfo.civName && tradeRequest.trade.isPeaceTreaty() } }
 
         for (enemy in enemiesCiv) {
-            if(hasAtLeastMotivationToAttack(civInfo, enemy, 10) >= 10) {
+            val bothAcceptedNegotiation = civInfo.getDiplomacyManager(enemy).hasFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod) &&
+                                          enemy.getDiplomacyManager(civInfo).hasFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod)
+            if ((hasAtLeastMotivationToAttack(civInfo, enemy, 10) >= 10) && !bothAcceptedNegotiation) {
                 // We can still fight. Refuse peace.
                 continue
             }
@@ -293,17 +297,51 @@ object DiplomacyAutomation {
             tradeLogic.currentTrade.ourOffers.add(TradeOffer(Constants.peaceTreaty, TradeType.Treaty))
             tradeLogic.currentTrade.theirOffers.add(TradeOffer(Constants.peaceTreaty, TradeType.Treaty))
 
-            var moneyWeNeedToPay = -TradeEvaluation().evaluatePeaceCostForThem(civInfo, enemy)
-
-            if (civInfo.gold > 0 && moneyWeNeedToPay > 0) {
+            val moneyWeNeedToPay = -TradeEvaluation().evaluatePeaceCostForThem(civInfo, enemy)
+            val surrenderValue = TradeEvaluation().evaluateTotalSurrenderValue(civInfo)
+            val citiesScorer = HashMap<String,Int>()
+            val listOfCities: MutableList<String> = ArrayList()
+            var goldAmount = 0
+            if (moneyWeNeedToPay > 0) {
                 if (moneyWeNeedToPay > civInfo.gold) {
-                    moneyWeNeedToPay = civInfo.gold  // As much as possible
+                    if (civInfo.gold > 0)
+                        goldAmount = civInfo.gold
+                    var gapToPayWithCities = moneyWeNeedToPay - goldAmount
+                    if (gapToPayWithCities >= surrenderValue) {
+                        for (city in civInfo.cities.filter { !it.isCapital() }) {
+                            listOfCities.add(city.id)
+                        }
+                    }
+                    else {
+                        for (city in civInfo.cities) {
+                            val cityValue = TradeEvaluation().evaluateCityValue(city, civInfo, false, happinessRelevant = false
+                            )
+                            citiesScorer[city.id] = cityValue
+                        }
+                        // let's sort the HashMap by ascending value (cheaper cities first)
+                        val sortedMap = citiesScorer.toList().sortedBy { it.second }.toMap()
+                        for ((key, value) in sortedMap) {
+                            if (gapToPayWithCities > 0) {
+                                listOfCities.add(key)
+                                gapToPayWithCities -= value
+                            }
+                            else break
+                        }
+                    }
+                } else {
+                    goldAmount = moneyWeNeedToPay
                 }
                 tradeLogic.currentTrade.ourOffers.add(
-                    TradeOffer("Gold".tr(), TradeType.Gold, moneyWeNeedToPay)
+                    TradeOffer("Gold".tr(), TradeType.Gold, goldAmount)
                 )
+                if (listOfCities.size > 0) {
+                    for (cityId in listOfCities) {
+                        tradeLogic.currentTrade.ourOffers.add(
+                            TradeOffer(cityId, TradeType.City, 1)
+                        )
+                    }
+                }
             }
-
             enemy.tradeRequests.add(TradeRequest(civInfo.civName, tradeLogic.currentTrade.reverse()))
         }
     }

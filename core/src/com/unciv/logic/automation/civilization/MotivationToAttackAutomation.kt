@@ -93,10 +93,10 @@ object MotivationToAttackAutomation {
 
         // for ongoing WAR in following lines we consider the evident will to proceed attacking by counting the military units that are close to other civ cities
         // in general a proper war with real willingness to conquer cities in the short term we will have at least 3 or more units
-        // idea is that if a real intent of continuing war in the shor term can be inferred due to current units distributions on the map close to cities we will get at least a +15/20 modifier by this
+        // idea is that if a real intent of continuing war in the shor term can be inferred due to current units distributions
         if (civInfo.getDiplomacyManager(otherCiv).diplomaticStatus == DiplomaticStatus.War) {
             // maxDistance is the upper bound of aeral distance value from any enemy city center tile to consider it "close"
-            val immediateCloseArmySize = countUnitsCloseToOtherCivCities(civInfo, otherCiv, 7)
+            val immediateCloseArmySize = countUnitsCloseToOtherCivCities(civInfo, otherCiv, 5)
             motivationSoFar += 5 * immediateCloseArmySize
         }
 
@@ -268,7 +268,7 @@ object MotivationToAttackAutomation {
         damageReceivedWhenAttacking < 100
     }
 
-    private fun countUnitsCloseToOtherCivCities(civInfo: Civilization, otherCiv: Civilization, maxDistance: Int): Int {
+    fun countUnitsCloseToOtherCivCities(civInfo: Civilization, otherCiv: Civilization, maxDistance: Int): Int {
         var unitsCounter = 0
         for (unit in civInfo.units.getCivUnits().filter { it.isMilitary() }) {
             if (otherCiv.cities.any { unit.getTile().aerialDistanceTo(it.getCenterTile()) < maxDistance }) {

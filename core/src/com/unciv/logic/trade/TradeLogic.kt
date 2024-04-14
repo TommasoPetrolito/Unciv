@@ -133,7 +133,15 @@ class TradeLogic(val ourCivilization: Civilization, val otherCivilization: Civil
                 }
                 TradeType.Treaty -> {
                     // Note: Treaties are not transfered from both sides due to notifications and double signing
-                    if (offer.name == Constants.peaceTreaty) to.getDiplomacyManager(from).makePeace()
+                    if (offer.name == Constants.peaceTreaty) {
+                        to.getDiplomacyManager(from).makePeace()
+                        if (to.getDiplomacyManager(from).hasFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod)) {
+                                to.getDiplomacyManager(from).removeFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod)
+                            }
+                        if (from.getDiplomacyManager(to).hasFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod)) {
+                            from.getDiplomacyManager(to).removeFlag(DiplomacyFlags.AcceptedPeaceNegotiationPeriod)
+                        }
+                    }
                     if (offer.name == Constants.researchAgreement) {
                         to.addGold(-offer.amount)
                         from.addGold(-offer.amount)

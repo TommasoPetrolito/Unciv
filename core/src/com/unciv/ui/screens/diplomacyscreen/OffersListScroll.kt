@@ -19,7 +19,7 @@ import com.unciv.logic.trade.TradeType.Strategic_Resource
 import com.unciv.logic.trade.TradeType.Technology
 import com.unciv.logic.trade.TradeType.Treaty
 import com.unciv.logic.trade.TradeType.WarDeclaration
-import com.unciv.logic.trade.TradeType.PeaceDeclaration
+import com.unciv.logic.trade.TradeType.PeaceNegotiation
 import com.unciv.logic.trade.TradeType.values
 import com.unciv.models.ruleset.tile.ResourceSupplyList
 import com.unciv.models.translations.tr
@@ -73,7 +73,7 @@ class OffersListScroll(
                 Strategic_Resource -> "Strategic resources"
                 Technology -> "Technologies"
                 WarDeclaration -> "Declarations of war"
-                PeaceDeclaration -> "Declaration of peace"
+                PeaceNegotiation -> "Negotiation of peace"
                 City -> "Cities"
             }
             val offersOfType = offersToDisplay.filter { it.type == offerType }

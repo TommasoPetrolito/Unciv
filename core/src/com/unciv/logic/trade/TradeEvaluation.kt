@@ -15,6 +15,7 @@ import com.unciv.models.ruleset.unique.UniqueType
 import com.unciv.models.translations.tr
 import com.unciv.ui.components.extensions.toPercent
 import com.unciv.ui.screens.victoryscreen.RankingType
+import java.util.concurrent.CompletionStage
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.pow
@@ -68,6 +69,7 @@ class TradeEvaluation {
     fun getTradeAcceptability(trade: Trade, evaluator: Civilization, tradePartner: Civilization): Int {
         val citiesAskedToSurrender = trade.ourOffers.count { it.type == TradeType.City }
         val maxCitiesToSurrender = ceil(evaluator.cities.size.toFloat() / 5).toInt()
+
         if (citiesAskedToSurrender > maxCitiesToSurrender) {
             return Int.MIN_VALUE
         }
@@ -85,6 +87,7 @@ class TradeEvaluation {
             if (relationshipLevel == RelationshipLevel.Enemy) sumOfOurOffers = (sumOfOurOffers * 1.5).toInt()
             else if (relationshipLevel == RelationshipLevel.Unforgivable) sumOfOurOffers *= 2
         }
+
         if (trade.ourOffers.firstOrNull { it.name == Constants.defensivePact } != null) {
             if (relationshipLevel == RelationshipLevel.Ally) {
                 //todo: Add more in depth evaluation here
@@ -164,43 +167,41 @@ class TradeEvaluation {
 
             TradeType.PeaceNegotiation -> {
                 val civToMakePeaceWith = civInfo.gameInfo.getCivilization(offer.name)
+                val motivationToContinueFighting = MotivationToAttackAutomation.hasAtLeastMotivationToAttack(civInfo, civToMakePeaceWith, 10)
                 // following Boolean condition check is the same that triggers the Peace Offer automation in Diplomacy Automation
-                val alreadyWantsPeaceFlag = (MotivationToAttackAutomation.hasAtLeastMotivationToAttack(civInfo, civToMakePeaceWith, 10) < 10)
+                val alreadyWantsPeaceFlag = ( motivationToContinueFighting < 10)
                 val costRequiredByEnemy = evaluatePeaceCostForThem(civInfo, civToMakePeaceWith)
                 val costRequiredByCiv = evaluatePeaceCostForThem(civToMakePeaceWith, civInfo)
-                val gapToPay = if (alreadyWantsPeaceFlag && (civInfo.gold < costRequiredByEnemy))
-                                    costRequiredByEnemy - civInfo.gold
+                val enemyCitiesSurrendingValue = evaluateTotalSurrenderValue(civToMakePeaceWith)
+                val civCitiesSurrendingValue = evaluateTotalSurrenderValue(civInfo)
+                val gapToPay = if (alreadyWantsPeaceFlag && ((civInfo.gold + civCitiesSurrendingValue) < costRequiredByEnemy))
+                                    costRequiredByEnemy - (civInfo.gold + civCitiesSurrendingValue)
                                 else if (alreadyWantsPeaceFlag)
-                                        0
-                                     else if (civToMakePeaceWith.gold < costRequiredByCiv)
-                                        costRequiredByCiv - civToMakePeaceWith.gold
-                                     else
-                                         0
+                                    0
+                                else if ((civToMakePeaceWith.gold + enemyCitiesSurrendingValue) < costRequiredByCiv)
+                                    costRequiredByCiv - (civToMakePeaceWith.gold + enemyCitiesSurrendingValue)
+                                else
+                                    0
                 return if (alreadyWantsPeaceFlag) {
                     // just to cover next turn eventual inflation and diplomatic expenses
                     (gapToPay + ((gapToPay) * 0.01)).toInt()
                 } else {
                     when (Automation.threatAssessment(civInfo, tradePartner)) {
-                        ThreatLevel.VeryLow -> 1000 + gapToPay
-                        ThreatLevel.Low -> 500 + gapToPay
-                        ThreatLevel.Medium -> 250 + gapToPay
-                        ThreatLevel.High -> 100 + gapToPay
-                        ThreatLevel.VeryHigh -> 50 + gapToPay
+                        ThreatLevel.VeryLow -> 1000 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.Low -> 500 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.Medium -> 250 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.High -> 100 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.VeryHigh -> 50 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
                     }
                 }
-
             }
 
             TradeType.City -> {
                 val city = tradePartner.cities.firstOrNull { it.id == offer.name }
                     ?: throw Exception("Got an offer for city id "+offer.name+" which does't seem to exist for this civ!")
-                val stats = city.cityStats.currentCityStats
-                val surrounded: Int = surroundedByOurCities(city, civInfo)
-                if (civInfo.getHappiness() + city.cityStats.happinessList.values.sum() < 0)
-                    return 0 // we can't really afford to go into negative happiness because of buying a city
-                val sumOfStats = stats.culture + stats.gold + stats.science + stats.production + stats.happiness + stats.food + surrounded
-                return sumOfStats.toInt() * 100
+                return(evaluateCityValue(city, civInfo, false, happinessRelevant = false))
             }
+
             TradeType.Agreement -> {
                 if (offer.name == Constants.openBorders) return 100
                 throw Exception("Invalid agreement type!")
@@ -311,26 +312,41 @@ class TradeEvaluation {
 
             TradeType.PeaceNegotiation -> {
                 val civToMakePeaceWith = civInfo.gameInfo.getCivilization(offer.name)
-                return when (Automation.threatAssessment(civInfo, civToMakePeaceWith)) {
-                    ThreatLevel.VeryLow -> 10000
-                    ThreatLevel.Low -> 1000
-                    ThreatLevel.Medium -> 500
-                    ThreatLevel.High -> 250
-                    ThreatLevel.VeryHigh -> 100
+                val motivationToContinueFighting = MotivationToAttackAutomation.hasAtLeastMotivationToAttack(civInfo, civToMakePeaceWith, 10)
+                // following Boolean condition check is the same that triggers the Peace Offer automation in Diplomacy Automation
+                val alreadyWantsPeaceFlag = (motivationToContinueFighting < 10)
+                val costRequiredByEnemy = evaluatePeaceCostForThem(civInfo, civToMakePeaceWith)
+                val costRequiredByCiv = evaluatePeaceCostForThem(civToMakePeaceWith, civInfo)
+                val enemyCitiesSurrendingValue = evaluateTotalSurrenderValue(civToMakePeaceWith)
+                val civCitiesSurrendingValue = evaluateTotalSurrenderValue(civInfo)
+                val gapToPay = if (alreadyWantsPeaceFlag && ((civInfo.gold + civCitiesSurrendingValue) < costRequiredByEnemy))
+                    costRequiredByEnemy - (civInfo.gold + civCitiesSurrendingValue)
+                else if (alreadyWantsPeaceFlag)
+                    0
+                else if ((civToMakePeaceWith.gold + enemyCitiesSurrendingValue) < costRequiredByCiv)
+                    costRequiredByCiv - (civToMakePeaceWith.gold + enemyCitiesSurrendingValue)
+                else
+                    0
+                return if (alreadyWantsPeaceFlag) {
+                    // just to cover next turn eventual inflation and diplomatic expenses
+                    (gapToPay + ((gapToPay) * 0.01)).toInt()
+                } else {
+                    when (Automation.threatAssessment(civInfo, tradePartner)) {
+                        ThreatLevel.VeryLow -> 1000 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.Low -> 500 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.Medium -> 250 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.High -> 100 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                        ThreatLevel.VeryHigh -> 50 + gapToPay + (motivationToContinueFighting * civInfo.getEraNumber())
+                    }
                 }
-
             }
 
             TradeType.City -> {
                 val city = civInfo.cities.firstOrNull { it.id == offer.name }
                     ?: throw Exception("Got an offer to sell city id " + offer.name + " which does't seem to exist for this civ!")
-
-                val distanceBonus = distanceCityTradeModifier(civInfo, city)
-                val stats = city.cityStats.currentCityStats
-                val sumOfStats =
-                    stats.culture + stats.gold + stats.science + stats.production + stats.happiness + stats.food + distanceBonus
-                return (sumOfStats.toInt() * 100).coerceAtLeast(1000)
+                return evaluateCityValue(city, civInfo, true, happinessRelevant = true).coerceAtLeast(1000)
             }
+
             TradeType.Agreement -> {
                 if (offer.name == Constants.openBorders) {
                     return when (civInfo.getDiplomacyManager(tradePartner).relationshipIgnoreAfraid()) {
@@ -374,6 +390,7 @@ class TradeEvaluation {
     fun evaluatePeaceCostForThem(ourCivilization: Civilization, otherCivilization: Civilization): Int {
         val ourCombatStrength = ourCivilization.getStatForRanking(RankingType.Force)
         val theirCombatStrength = otherCivilization.getStatForRanking(RankingType.Force)
+        // if war force is similar and there is no imminent big armies approaching to our cities
         if (ourCombatStrength * 1.5f >= theirCombatStrength && theirCombatStrength * 1.5f >= ourCombatStrength)
             return 0 // we're roughly equal, there's no huge power imbalance
         if (ourCombatStrength > theirCombatStrength) {
@@ -382,8 +399,13 @@ class TradeEvaluation {
             // We don't add the same constraint here. We should not make peace easily if we're
             // heavily advantaged.
             val totalAdvantage = (absoluteAdvantage * percentageAdvantage).toInt() * 10
-            if(totalAdvantage < 0) //May be a negative number if strength disparity is such that it leads to integer overflow
-                return 10000    //in that rare case, the AI would accept peace against a defeated foe.
+            // if the civ is being defeated and has more than 1 cities, let's get a peaceTreaty opportunity including the value of all non-capital remaining cities and all the gold
+            // next wars with related eventual peaceTrade won't allow to use again this opportunity due to only capital city remaining
+            if (percentageAdvantage >= 0.80 && otherCivilization.cities.size > 1 && MotivationToAttackAutomation.countUnitsCloseToOtherCivCities(ourCivilization, otherCivilization, 5) > 1) {
+                return evaluateTotalSurrenderValue(otherCivilization) + otherCivilization.gold
+            }
+            if (totalAdvantage < 0) //May be a negative number if strength disparity is such that it leads to integer overflow
+                return Int.MAX_VALUE //in that rare case, the AI would accept peace against a defeated foe.
             return totalAdvantage
         } else {
             // This results in huge values for large power imbalances. However, we should not give
@@ -409,7 +431,15 @@ class TradeEvaluation {
             // (stats ~30 each)
             val absoluteAdvantage = theirCombatStrength - ourCombatStrength
             val percentageAdvantage = absoluteAdvantage / ourCombatStrength.toFloat()
-            return -min((absoluteAdvantage * percentageAdvantage).toInt() * 10, 100000)
+            // if the civ is being defeated and has more than 1 cities, let's get a peaceTreaty opportunity including the value of all non-capital remaining cities and all the gold
+            // next wars with related eventual peaceTrade won't allow to use again this opportunity due to only capital city remaining
+            if (percentageAdvantage >= 0.80 && ourCivilization.cities.size > 1 && MotivationToAttackAutomation.countUnitsCloseToOtherCivCities(otherCivilization, ourCivilization, 5) > 1) {
+                return -(evaluateTotalSurrenderValue(ourCivilization) + ourCivilization.gold)
+            }
+            val totalAdvantage = (absoluteAdvantage * percentageAdvantage).toInt() * 10
+            if(totalAdvantage < 0) //May be a negative number if strength disparity is such that it leads to integer overflow
+                return Int.MAX_VALUE //in that rare case, the AI would accept peace against a defeated foe.
+            return -min(totalAdvantage, 100000)
         }
     }
 
@@ -417,5 +447,40 @@ class TradeEvaluation {
         val unique = ruleSet.modOptions.getMatchingUniques(UniqueType.TradeCivIntroductions).firstOrNull()
             ?: return 0
         return unique.params[0].toInt()
+    }
+
+    fun evaluateCityValue(city: City, civInfo: Civilization, belongsToCiv: Boolean, happinessRelevant: Boolean): Int {
+        val stats = city.cityStats.currentCityStats
+        val surrounded: Int = surroundedByOurCities(city, civInfo)
+        if (happinessRelevant && belongsToCiv && (civInfo.getHappiness() - city.cityStats.happinessList.values.sum() < 0))
+            return 10000 // we can't really afford to go into negative happiness because of selling a city
+        else if (happinessRelevant && !belongsToCiv && (civInfo.getHappiness() + city.cityStats.happinessList.values.sum() < 0))
+            return 0 // we can't really afford to go into negative happiness because of buying a city
+        var bonus = 0
+        if (belongsToCiv) {
+            if (city.isCapital())
+                // can't sell the capital
+                bonus += 15000
+            else if (city.isConnectedToCapital() || city.isGarrisoned() || city.isHolyCity()) {
+                // if the city is road-connected to capital or garrisoned or holycity it is meant to be of relevant importance for owner/selling civ
+                bonus += 3 * civInfo.getEraNumber()
+            }
+        }
+        if (city.isOriginalCapital)
+            // original capitals are of huge value due to them being part of Military Victory
+            bonus += 20 * civInfo.getEraNumber()
+        var sumOfStats = stats.culture + stats.gold + stats.science + stats.production + stats.happiness + stats.food + city.population.population + surrounded + bonus
+        if (city.isBeingRazed) {
+            sumOfStats = (sumOfStats * (city.health/city.getMaxHealth()))
+        }
+        return sumOfStats.toInt() * 100
+    }
+
+    fun evaluateTotalSurrenderValue(civInfo: Civilization): Int {
+        var citiesValueScore = 0
+        for (city in civInfo.cities.filter { !it.isCapital()}) {
+            citiesValueScore += evaluateCityValue(city, civInfo, false, happinessRelevant = false)
+        }
+        return citiesValueScore
     }
 }
