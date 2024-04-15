@@ -199,7 +199,7 @@ class TradeEvaluation {
             TradeType.City -> {
                 val city = tradePartner.cities.firstOrNull { it.id == offer.name }
                     ?: throw Exception("Got an offer for city id "+offer.name+" which does't seem to exist for this civ!")
-                return(evaluateCityValue(city, civInfo, false, happinessRelevant = false))
+                return(evaluateCityValue(city, civInfo, false, happinessRelevant = true))
             }
 
             TradeType.Agreement -> {
